@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Feature Status</title>
+    <!--  (c) 2013 Rally Software Development Corp.  All Rights Reserved. -->
+    <!--  Build Date: Wed Oct 30 2013 08:22:59 GMT-0700 (PDT) -->
+    
+    <script type="text/javascript">
+        var APP_BUILD_DATE = "Wed Oct 30 2013 08:22:59 GMT-0700 (PDT)";
+        var CHECKSUM = 4227640188;
+    </script>
+    
+    <script type="text/javascript" src="/apps/2.0rc1/sdk.js"></script>
+
+    <script type="text/javascript">
+        Rally.onReady(function() {
+             
+/**
+ * A link that pops up a version dialog box
+ */
+
+Ext.define('Rally.technicalservices.InfoLink',{
+    extend: 'Ext.Component',
+    alias: 'widget.tsinfolink',
+    
+    /**
+     * @cfg {String} informationHtml
+     * Additional text to be displayed on the popup dialog (for exmaple,
+     * to add a description of the app's use or functionality)
+     */
+    informationHtml: null,
+    
+    /**
+     * 
+     * cfg {String} title
+     * The title for the dialog box
+     */
+     text: "Information",
+    
+    renderTpl: "<div id='{id}-infolinkWrap' class='tsinfolink'>TS</div>",
+
+    initComponent: function() {
+        this.callParent(arguments);
+       
+    },
+    
+    onRender: function() {
+        this.callParent(arguments);
+        this.mon(this.el,'click',this.onClick,this);
+    },
+    _generateChecksum: function(string){
+        var chk = 0x12345678,
+            i;
+        string = string.replace(/var CHECKSUM = .*;/,"");
+        
+        for (i = 0; i < string.length; i++) {
+            chk += (string.charCodeAt(i) * i);
+        }
+    
+        return chk;
+    },
+    _checkChecksum: function(container) {
+        var me = this;
+        Ext.Ajax.request({
+            url: document.URL,
+            params: {
+                id: 1
+            },
+            success: function (response) {
+                text = response.responseText;
+                if ( CHECKSUM ) {
+                    if ( CHECKSUM !== me._generateChecksum(text) ) {
+                        console.log("Checksums don't match!");
+                        if ( me.dialog ) {
+                            me.dialog.add({xtype:'container',html:'Checksums do not match'});
+                        }
+                    }
+                }
+            }
+        });
+    },
+    onClick: function(e) {
+        var me = this;
+        this._checkChecksum(this);
+        
+        var dialog_items = [];
+        
+        if ( this.informationHtml ) {
+            dialog_items.push({
+                xtype:'container',
+                html: this.informationHtml
+            });
+        }
+                
+        dialog_items.push({
+            xtype:'container',
+            html:"This app was created by the Rally Technical Services Team."
+        });
+        
+        if ( APP_BUILD_DATE ) {
+            dialog_items.push({
+                xtype:'container',
+                html:'Build date/time: ' + APP_BUILD_DATE
+            });
+        }
+        
+        if (this.dialog){this.dialog.destroy();}
+        this.dialog = Ext.create('Rally.ui.dialog.Dialog',{
+            defaults: { padding: 5, margin: 5 },
+            closable: true,
+            draggable: true,
+            title: me.title,
+            items: dialog_items
+        });
+        this.dialog.show();
+    }
+});
+/*
+ */
+Ext.define('Rally.technicalservices.logger',{
+    constructor: function(config){
+        Ext.apply(this,config);
+    },
+    log: function(args){
+        var output_args = [];
+        if (arguments.length === 0 ) {
+            window.console && console.log(arguments);
+            return;
+        }
+        if (arguments.length === 1 ) {
+            output_args = arguments;
+        } else {
+            var src_class = arguments[0];
+            var class_name = "";
+            if ( typeof(src_class) === "string" ) {
+                class_name = src_class;
+            } else if ( typeof src_class.getName === "function") { 
+                class_name = src_class.getName();
+            } else if (typeof src_class.self.getName === 'function'){
+                class_name = src_class.self.getName();
+            }
+            //window.console && console.log(class_name,"--",message);
+            output_args = Ext.Array.push(output_args,[class_name,"--"]);
+            output_args = Ext.Array.push(output_args,Ext.Array.slice(arguments,1));
+        }
+        window.console && console.log.apply(console,output_args);
+    }
+
+});
+Ext.define('CustomApp', {
+    extend: 'Rally.app.App',
+    componentCls: 'app',
+
+    _features: [],
+    
+    logger: new Rally.technicalservices.logger(),
+    items: [
+        {xtype:'container',itemId:'selector_box',margin: 5, layout:{type:'hbox'}},
+        {xtype:'container',itemId:'chart_box' },
+        {xtype:'tsinfolink'}
+    ],
+    launch: function() {
+        this._addSummary();
+    },
+    _addSummary: function() {
+        var selector_box = this.down('#selector_box');
+        selector_box.add({
+            xtype:'rallyreleasecombobox',
+            itemId:'releasebox',
+            listeners: {
+                scope: this,
+                change: function(rb, new_value, old_value) {
+                    this._asynch_return_flags = {};
+                    //this._getSprints();
+                    this._getStoriesInRelease();
+                },
+                ready: function(rb) {
+                    this._asynch_return_flags = {};
+                    //this._getSprints();
+                    this._getStoriesInRelease();
+                }
+            }
+        });
+    },
+    _getStoriesInRelease: function() {
+        var me = this;
+        this._features = [];
+        this._async_flags = {};
+        
+        var release = this.down('#releasebox').getRecord();
+        var release_name = release.get('Name');
+        
+        var fetch = ['PlanEstimate','Parent','Name','ObjectID'];
+        var filters = [{property:'Release.Name',value:release_name}];
+        Ext.create('Rally.data.WsapiDataStore',{
+            model:'UserStory',
+            autoLoad: true,
+            filters: filters,
+            fetch: fetch,
+            listeners: {
+                scope: this,
+                load: function(store,stories){
+                    Ext.Array.each(stories,function(story){
+                        me.logger.log(this,story.get('Name'));
+                        
+                        if ( story.get('Parent') !== null ) {
+                            me.logger.log(this,"Has a parent!");
+                            me._async_flags[story.get('ObjectID')] = 1;
+                            me._getTopLevelParent(story,story);
+                        } else {
+                            me._features.push(story);
+                        }
+                    });
+                    this._makeChart();
+                }
+            }
+        });
+    },
+    // keep track of calls as we spray a bunch of async calls looking for the most top level parent
+    _getTopLevelParent: function(story,original_child) {
+        var me = this;
+        var fetch = ['PlanEstimate','Parent','Name','ObjectID'];
+        var filters = [{property:'ObjectID',value:story.get('Parent').ObjectID}];
+        Ext.create('Rally.data.WsapiDataStore',{
+            model:'UserStory',
+            autoLoad: true,
+            filters: filters,
+            fetch: fetch,
+            listeners: {
+                scope: this,
+                load: function(store,parents){
+                    Ext.Array.each(parents,function(parent){
+                        if ( parent.get('Parent') !== null ) {
+                            me.logger.log(this,"Has a parent!");
+                            if ( story.get('ObjectID') !== original_child.get('ObjectID') ) {
+                                delete me._async_flags[story.get('ObjectID')];
+                            }
+                            me._getTopLevelParent(parent,original_child);
+                        } else {
+                            delete me._async_flags[original_child.get('ObjectID')];
+                            me._features.push(parent);
+                        }
+                    });
+                    me._makeChart();
+                }
+            }
+        });
+    },
+    _getChartData: function() {
+        var me = this;
+        this.logger.log(this,"_getSeriesData");
+        var chart_data = [];
+        
+        var data = [];
+        var names = [];
+        
+        Ext.Array.each(me._features,function(feature){
+            data.push(1);
+            names.push(feature.get('Name'));
+        });
+        
+        var series = [
+            {
+                type: 'column',
+                data: data,
+                visible: true,
+                name: 'test'
+            }
+        ];
+        return { series: series, categories: names };
+    },
+    _makeChart: function() {
+        this.logger.log(this,"_makeChart");
+        this.down('#chart_box').removeAll();
+        
+        if ( Ext.Object.getKeys(this._async_flags).length > 0 ) {
+            this.logger.log(this,"Waiting for ", this._async_flags);
+        } else {
+            var chart_data = this._getChartData();
+            if ( chart_data.categories.length === 0 ) {
+                this.down('#chart_box').add({xtype:'container',html:'No Features found for selection.'});
+            } else {
+                this.down('#chart_box').add({
+                    xtype:'rallychart',
+                    chartData: {
+                        categories: chart_data.categories,
+                        series: chart_data.series
+                    },
+                    chartConfig: {
+                        chart: { height: 600 },
+                        title: { text: 'Feature Status', align: 'center' },
+                        yAxis: [{
+                            title: {
+                                enabled: true,
+                                text: 'Story Points',
+                                style: { fontWeight: 'normal' }
+                            }
+                        }],
+                        xAxis: [{
+                            title: {
+                                enabled: true,
+                                text: 'Features'
+                            },
+                            categories: chart_data.categories,
+                            labels: {
+                                rotation: 90,
+                                align: 'left'
+                            }
+                        }]
+                    }
+                });
+            }
+        }
+    }
+});
+/*
+ * Fixes rc1 eternal sparkler
+ * 
+ */
+Ext.override(Rally.ui.chart.Chart,{
+    onRender: function () {
+        this.callParent(arguments);
+        this._unmask();
+    }
+});
+            
+               Rally.launchApp('CustomApp', {
+                   name: 'Feature Status'
+               });
+        });
+    </script>
+    
+    <style type="text/css">
+
+.app {
+}
+.tsinfolink {
+    position:absolute;
+    right:0px;
+    width:5%;
+}
+    </style>
+
+</head>
+<body></body>
+</html>
