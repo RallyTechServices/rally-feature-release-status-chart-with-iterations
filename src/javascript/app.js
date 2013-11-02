@@ -60,6 +60,8 @@ Ext.define('CustomApp', {
                         } else {
                             var plan_estimate = story.get('PlanEstimate') || 0;
                             story.set('total_planned',plan_estimate);
+                            story.set('child_count',0);
+                            
                             me._features[story.get('ObjectID')] = story;
                         }
                     });
@@ -93,12 +95,15 @@ Ext.define('CustomApp', {
                             
                             var plan_estimate = original_child.get('PlanEstimate') || 0;
                             if ( me._features[parent.get('ObjectID')] ) {
-                                var feature_total = me._features[parent.get('ObjectID')].get('total_planned');
+                                var feature = me._features[parent.get('ObjectID')];
+                                var feature_total = feature.get('total_planned');
                                 
-                                me._features[parent.get('ObjectID')].set('total_planned',feature_total + plan_estimate);
+                                feature.set('total_planned',feature_total + plan_estimate);
+                                feature.set('child_count',feature.get('child_count') + 1);
 
                             } else {
                                 parent.set('total_planned', plan_estimate) ;
+                                parent.set('child_count',1);
                                 me._features[parent.get('ObjectID')] = parent;
                             }
                         }
@@ -139,7 +144,7 @@ Ext.define('CustomApp', {
         var names = [];
         
         Ext.Array.each(features, function(feature){
-            me.logger.log(me,feature);
+            me.logger.log(me,feature.get('Name'), feature.get('child_count'));
             names.push(feature.get('Name'));
             data.push(feature.get('total_planned'));
         });
