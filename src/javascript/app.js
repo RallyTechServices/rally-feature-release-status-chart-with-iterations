@@ -58,6 +58,8 @@ Ext.define('CustomApp', {
                             me._async_flags[story.get('ObjectID')] = 1;
                             me._getTopLevelParent(story,story);
                         } else {
+                            var plan_estimate = story.get('PlanEstimate') || 0;
+                            story.set('total_planned',plan_estimate);
                             me._features[story.get('ObjectID')] = story;
                         }
                     });
@@ -88,7 +90,17 @@ Ext.define('CustomApp', {
                             me._getTopLevelParent(parent,original_child);
                         } else {
                             delete me._async_flags[original_child.get('ObjectID')];
-                            me._features[parent.get('ObjectID')] = parent;
+                            
+                            var plan_estimate = original_child.get('PlanEstimate') || 0;
+                            if ( me._features[parent.get('ObjectID')] ) {
+                                var feature_total = me._features[parent.get('ObjectID')].get('total_planned');
+                                
+                                me._features[parent.get('ObjectID')].set('total_planned',feature_total + plan_estimate);
+
+                            } else {
+                                parent.set('total_planned', plan_estimate) ;
+                                me._features[parent.get('ObjectID')] = parent;
+                            }
                         }
                     });
                     me._makeChart();
@@ -127,8 +139,9 @@ Ext.define('CustomApp', {
         var names = [];
         
         Ext.Array.each(features, function(feature){
+            me.logger.log(me,feature);
             names.push(feature.get('Name'));
-            data.push(2);
+            data.push(feature.get('total_planned'));
         });
         
         
@@ -138,7 +151,7 @@ Ext.define('CustomApp', {
                 type: 'column',
                 data: data,
                 visible: true,
-                name: 'test'
+                name: 'Total Planned US Points'
             }
         ];
         return { series: series, categories: names };
