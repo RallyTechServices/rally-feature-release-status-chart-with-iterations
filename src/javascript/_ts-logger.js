@@ -5,7 +5,7 @@ Ext.define('Rally.technicalservices.logger',{
         Ext.apply(this,config);
     },
     log: function(args){
-        var output_args = [];
+        var output_args = [new Date()];
         if (arguments.length === 0 ) {
             window.console && console.log(arguments);
             return;

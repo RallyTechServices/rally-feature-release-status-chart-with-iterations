@@ -2,7 +2,7 @@ Ext.define('CustomApp', {
     extend: 'Rally.app.App',
     componentCls: 'app',
 
-    _features: [],
+    _features: {}, /* key will be objectid */
     
     logger: new Rally.technicalservices.logger(),
     items: [
@@ -35,7 +35,8 @@ Ext.define('CustomApp', {
     },
     _getStoriesInRelease: function() {
         var me = this;
-        this._features = [];
+        this.logger.log(this,"_getStoriesInRelease");
+        this._features = {};
         this._async_flags = {};
         
         var release = this.down('#releasebox').getRecord();
@@ -51,15 +52,13 @@ Ext.define('CustomApp', {
             listeners: {
                 scope: this,
                 load: function(store,stories){
-                    Ext.Array.each(stories,function(story){
-                        me.logger.log(this,story.get('Name'));
-                        
+                    me.logger.log(this,"    ...got stories in release",stories.length);
+                    Ext.Array.each(stories,function(story){  
                         if ( story.get('Parent') !== null ) {
-                            me.logger.log(this,"Has a parent!");
                             me._async_flags[story.get('ObjectID')] = 1;
                             me._getTopLevelParent(story,story);
                         } else {
-                            me._features.push(story);
+                            me._features[story.get('ObjectID')] = story;
                         }
                     });
                     this._makeChart();
@@ -69,6 +68,7 @@ Ext.define('CustomApp', {
     },
     // keep track of calls as we spray a bunch of async calls looking for the most top level parent
     _getTopLevelParent: function(story,original_child) {
+        this.logger.log(this,"_getTopLevelParent");
         var me = this;
         var fetch = ['PlanEstimate','Parent','Name','ObjectID'];
         var filters = [{property:'ObjectID',value:story.get('Parent').ObjectID}];
@@ -82,14 +82,13 @@ Ext.define('CustomApp', {
                 load: function(store,parents){
                     Ext.Array.each(parents,function(parent){
                         if ( parent.get('Parent') !== null ) {
-                            me.logger.log(this,"Has a parent!");
                             if ( story.get('ObjectID') !== original_child.get('ObjectID') ) {
                                 delete me._async_flags[story.get('ObjectID')];
                             }
                             me._getTopLevelParent(parent,original_child);
                         } else {
                             delete me._async_flags[original_child.get('ObjectID')];
-                            me._features.push(parent);
+                            me._features[parent.get('ObjectID')] = parent;
                         }
                     });
                     me._makeChart();
@@ -97,18 +96,42 @@ Ext.define('CustomApp', {
             }
         });
     },
+    _sortFeatures: function(a,b) {
+        var name_a = "";
+        var name_b = "";
+        
+        if ( a && a.get('Name') ) {
+            name_a = a.get('Name');
+        }
+        
+        if ( b && b.get('Name') ) {
+            name_b = b.get('Name');
+        }
+        return name_a.localeCompare(name_b);
+    },
     _getChartData: function() {
         var me = this;
-        this.logger.log(this,"_getSeriesData");
+        this.logger.log(this,"_getChartData");
         var chart_data = [];
+        
+        var features = [];
+        Ext.Object.each(me._features, function(feature_oid,feature){
+            features.push(feature);
+        });
+       
+        this.logger.log(this,"sorting features...");
+        features.sort(me._sortFeatures);
+        this.logger.log(this,"...done", features.length, "features");
         
         var data = [];
         var names = [];
         
-        Ext.Array.each(me._features,function(feature){
-            data.push(1);
+        Ext.Array.each(features, function(feature){
             names.push(feature.get('Name'));
+            data.push(2);
         });
+        
+        
         
         var series = [
             {
@@ -128,6 +151,7 @@ Ext.define('CustomApp', {
             this.logger.log(this,"Waiting for ", this._async_flags);
         } else {
             var chart_data = this._getChartData();
+            
             if ( chart_data.categories.length === 0 ) {
                 this.down('#chart_box').add({xtype:'container',html:'No Features found for selection.'});
             } else {
