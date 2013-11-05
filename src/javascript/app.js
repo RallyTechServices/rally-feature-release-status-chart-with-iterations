@@ -3,6 +3,8 @@ Ext.define('CustomApp', {
     componentCls: 'app',
 
     _features: {}, /* key will be objectid */
+    _async_flags: {}, /* key is object id of release work item looking up the tree */
+    _feature_map: {}, /* key will be objectid */
     
     logger: new Rally.technicalservices.logger(),
     items: [
@@ -36,8 +38,13 @@ Ext.define('CustomApp', {
     _getStoriesInRelease: function() {
         var me = this;
         this.logger.log(this,"_getStoriesInRelease");
+        if ( this.down('#selector_box').getEl() ) {
+            this.down('#selector_box').getEl().mask("Finding Stories in Release...");
+        }
+        // clear out trackers
         this._features = {};
         this._async_flags = {};
+        this._feature_map = {};
         
         var release = this.down('#releasebox').getRecord();
         var release_name = release.get('Name');
@@ -48,21 +55,22 @@ Ext.define('CustomApp', {
             model:'UserStory',
             autoLoad: true,
             filters: filters,
+            limit:'Infinity',
             fetch: fetch,
             listeners: {
                 scope: this,
                 load: function(store,stories){
                     me.logger.log(this,"    ...got stories in release",stories.length);
+                    if ( this.down('#selector_box').getEl() ) {
+                        this.down('#selector_box').getEl().mask("Finding Associated Features...");
+                    }
                     Ext.Array.each(stories,function(story){  
                         if ( story.get('Parent') !== null ) {
                             me._async_flags[story.get('ObjectID')] = 1;
                             me._getTopLevelParent(story,story);
                         } else {
-                            var plan_estimate = story.get('PlanEstimate') || 0;
-                            story.set('total_planned',plan_estimate);
-                            story.set('child_count',0);
-                            
                             me._features[story.get('ObjectID')] = story;
+                            me._addToFeature(story,story);
                         }
                     });
                     this._makeChart();
@@ -70,48 +78,86 @@ Ext.define('CustomApp', {
             }
         });
     },
+    _addToFeature: function(feature,item){
+        this._feature_map[item.get('ObjectID')] = feature.get('ObjectID');
+        
+        var feature_total = feature.get('total_planned') || 0;
+        var feature_count = feature.get('child_count') || 0;
+        
+        var plan_estimate = item.get('PlanEstimate') || 0;
+        
+        feature.set('total_planned',feature_total + plan_estimate);
+        feature.set('child_count',feature_count + 1);
+    },
     // keep track of calls as we spray a bunch of async calls looking for the most top level parent
     _getTopLevelParent: function(story,original_child) {
         this.logger.log(this,"_getTopLevelParent");
         var me = this;
         var fetch = ['PlanEstimate','Parent','Name','ObjectID'];
         var filters = [{property:'ObjectID',value:story.get('Parent').ObjectID}];
-        Ext.create('Rally.data.WsapiDataStore',{
-            model:'UserStory',
-            autoLoad: true,
-            filters: filters,
-            fetch: fetch,
-            listeners: {
-                scope: this,
-                load: function(store,parents){
-                    Ext.Array.each(parents,function(parent){
-                        if ( parent.get('Parent') !== null ) {
-                            if ( story.get('ObjectID') !== original_child.get('ObjectID') ) {
-                                delete me._async_flags[story.get('ObjectID')];
-                            }
-                            me._getTopLevelParent(parent,original_child);
-                        } else {
-                            delete me._async_flags[original_child.get('ObjectID')];
-                            
-                            var plan_estimate = original_child.get('PlanEstimate') || 0;
-                            if ( me._features[parent.get('ObjectID')] ) {
-                                var feature = me._features[parent.get('ObjectID')];
-                                var feature_total = feature.get('total_planned');
+        
+        // check first to see if this is in the map (so we don't bother the network)
+        if ( me._feature_map[story.get('Parent').ObjectID] ) {
+            me.logger.log(this,"Pulling from hash (parent) instead of querying");
+            var feature = me._features[me._feature_map[story.get('Parent').ObjectID]];
+            me._addToFeature(feature,original_child);
+            delete me._async_flags[original_child.get('ObjectID')];
+            me._makeChart();
+        } else if (me._feature_map[story.get('ObjectID')] ) {
+            me.logger.log(this,"Pulling from hash (story) instead of querying");
+            var feature = me._features[me._feature_map[story.get('ObjectID')]];
+            me._addToFeature(feature,original_child);
+            delete me._async_flags[original_child.get('ObjectID')];
+            me._makeChart();
+        } else if (me._features[story.get('Parent').ObjectID]) {
+            me.logger.log(this,"Already know parent feature (instead of querying)");
+            var feature = me._features[story.get('Parent').ObjectID];
+            me._addToFeature(feature,original_child);
+            delete me._async_flags[original_child.get('ObjectID')];
+            me._makeChart();
+        } else {
+            
+            Ext.create('Rally.data.WsapiDataStore',{
+                model:'UserStory',
+                autoLoad: true,
+                filters: filters,
+                fetch: fetch,
+                listeners: {
+                    scope: this,
+                    load: function(store,parents){
+                        Ext.Array.each(parents,function(parent){
+                            if ( parent.get('Parent') !== null ) {
+                                if ( story.get('ObjectID') !== original_child.get('ObjectID') ) {
+                                    delete me._async_flags[story.get('ObjectID')];
+                                }
                                 
-                                feature.set('total_planned',feature_total + plan_estimate);
-                                feature.set('child_count',feature.get('child_count') + 1);
-
+                                if ( me._features[parent.get('Parent').ObjectID] ) {
+                                    // put into map hash for easy pulling later
+                                    me.logger.log(me,"My Parent is already known");
+                                    me._feature_map[parent.get('ObjectID')] = me._features[parent.get('Parent').ObjectID].get('ObjectID');
+                                    me._feature_map[story.get('ObjectID')]  = me._features[parent.get('Parent').ObjectID].get('ObjectID');
+                                    me._addToFeature(me._features[parent.get('Parent').ObjectID],original_child);
+                                    delete me._async_flags[original_child.get('ObjectID')];
+                                    me._makeChart();
+                                } else {
+                                    me._getTopLevelParent(parent,original_child);
+                                }
                             } else {
-                                parent.set('total_planned', plan_estimate) ;
-                                parent.set('child_count',1);
-                                me._features[parent.get('ObjectID')] = parent;
+                                // we're at the top
+                                if ( !me._features[parent.get('ObjectID')] ) {
+                                    me._features[parent.get('ObjectID')] = parent;
+                                }
+                                // put into map hash for easy pulling later
+                                me._feature_map[story.get('ObjectID')] = parent.get('ObjectID');
+                                me._addToFeature(me._features[parent.get('ObjectID')], original_child);
+                                delete me._async_flags[original_child.get('ObjectID')];
+                                me._makeChart();
                             }
-                        }
-                    });
-                    me._makeChart();
+                        });
+                    }
                 }
-            }
-        });
+            });
+        }
     },
     _sortFeatures: function(a,b) {
         var name_a = "";
@@ -148,9 +194,7 @@ Ext.define('CustomApp', {
             names.push(feature.get('Name'));
             data.push(feature.get('total_planned'));
         });
-        
-        
-        
+
         var series = [
             {
                 type: 'column',
@@ -165,13 +209,15 @@ Ext.define('CustomApp', {
         this.logger.log(this,"_makeChart");
         this.down('#chart_box').removeAll();
         
-        if ( Ext.Object.getKeys(this._async_flags).length > 0 ) {
-            this.logger.log(this,"Waiting for ", this._async_flags);
+        var keys = Ext.Object.getKeys(this._async_flags);
+        if ( keys.length > 0 ) {
+            this.logger.log(this,"Waiting for ", keys.length, " searches to complete");
         } else {
             var chart_data = this._getChartData();
+            this.down('#selector_box').getEl().unmask();
             
             if ( chart_data.categories.length === 0 ) {
-                this.down('#chart_box').add({xtype:'container',html:'No Features found for selection.'});
+                this.down('#chart_box').add({xtype:'container',padding: 10, html:'No Features found for selection.'});
             } else {
                 this.down('#chart_box').add({
                     xtype:'rallychart',
