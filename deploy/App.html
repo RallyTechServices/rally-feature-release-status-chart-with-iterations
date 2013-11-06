@@ -3,11 +3,11 @@
 <head>
     <title>Feature Status</title>
     <!--  (c) 2013 Rally Software Development Corp.  All Rights Reserved. -->
-    <!--  Build Date: Mon Nov 04 2013 20:29:06 GMT-0800 (PST) -->
+    <!--  Build Date: Tue Nov 05 2013 20:12:08 GMT-0800 (PST) -->
     
     <script type="text/javascript">
-        var APP_BUILD_DATE = "Mon Nov 04 2013 20:29:06 GMT-0800 (PST)";
-        var CHECKSUM = 8555480665;
+        var APP_BUILD_DATE = "Tue Nov 05 2013 20:12:08 GMT-0800 (PST)";
+        var CHECKSUM = 13702669352;
     </script>
     
     <script type="text/javascript" src="/apps/2.0rc1/sdk.js"></script>
@@ -174,12 +174,60 @@ Ext.define('CustomApp', {
                 change: function(rb, new_value, old_value) {
                     this._asynch_return_flags = {};
                     //this._getSprints();
-                    this._getStoriesInRelease();
+                    this._getItemsInRelease();
                 },
                 ready: function(rb) {
                     this._asynch_return_flags = {};
                     //this._getSprints();
-                    this._getStoriesInRelease();
+                    this._getItemsInRelease();
+                }
+            }
+        });
+    },
+    _getItemsInRelease: function() {
+        if ( this.down('#selector_box').getEl() ) {
+            this.down('#selector_box').getEl().mask("Finding Items in Release...");
+        }
+        // clear out trackers
+        this._features = {};
+        this._async_flags = {defect:1,story:1};
+        this._feature_map = {};
+
+        this._getStoriesInRelease();
+        this._getDefectsInRelease();
+    },
+    _getDefectsInRelease: function() {
+        var me = this;
+        this.logger.log(this,"_getDefectsInRelease");
+        var release = this.down('#releasebox').getRecord();
+        var release_name = release.get('Name');
+        
+        var fetch = ['PlanEstimate','Requirement','Name','ObjectID','AcceptedDate'];
+        var filters = [{property:'Release.Name',value:release_name}];
+        Ext.create('Rally.data.WsapiDataStore',{
+            model:'Defect',
+            autoLoad: true,
+            filters: filters,
+            limit:'Infinity',
+            fetch: fetch,
+            listeners: {
+                scope: this,
+                load: function(store,defects){
+                    me.logger.log(this,"    ...got defects in release",defects.length);
+                    delete me._async_flags["defect"];
+                    
+                    Ext.Array.each(defects,function(defect){  
+                        if ( defect.get('Requirement') !== null ) {
+                            defect.set('Parent',defect.get('Requirement'));
+                            
+                            me._async_flags[defect.get('ObjectID')] = 1;
+                            me._getTopLevelParent(defect,defect);
+                        } else {
+                            me._features[defect.get('ObjectID')] = defect;
+                            me._addToFeature(defect,defect);
+                        }
+                    });
+                    this._makeChart();
                 }
             }
         });
@@ -187,18 +235,11 @@ Ext.define('CustomApp', {
     _getStoriesInRelease: function() {
         var me = this;
         this.logger.log(this,"_getStoriesInRelease");
-        if ( this.down('#selector_box').getEl() ) {
-            this.down('#selector_box').getEl().mask("Finding Stories in Release...");
-        }
-        // clear out trackers
-        this._features = {};
-        this._async_flags = {};
-        this._feature_map = {};
-        
+
         var release = this.down('#releasebox').getRecord();
         var release_name = release.get('Name');
         
-        var fetch = ['PlanEstimate','Parent','Name','ObjectID'];
+        var fetch = ['PlanEstimate','Parent','Name','ObjectID','AcceptedDate'];
         var filters = [{property:'Release.Name',value:release_name}];
         Ext.create('Rally.data.WsapiDataStore',{
             model:'UserStory',
@@ -213,7 +254,9 @@ Ext.define('CustomApp', {
                     if ( this.down('#selector_box').getEl() ) {
                         this.down('#selector_box').getEl().mask("Finding Associated Features...");
                     }
-                    Ext.Array.each(stories,function(story){  
+                    var length = stories.length;
+                    for ( var i=0; i<length; i++ ) {
+                        var story = stories[i];
                         if ( story.get('Parent') !== null ) {
                             me._async_flags[story.get('ObjectID')] = 1;
                             me._getTopLevelParent(story,story);
@@ -221,7 +264,8 @@ Ext.define('CustomApp', {
                             me._features[story.get('ObjectID')] = story;
                             me._addToFeature(story,story);
                         }
-                    });
+                    }
+                    delete me._async_flags["story"];
                     this._makeChart();
                 }
             }
@@ -230,12 +274,33 @@ Ext.define('CustomApp', {
     _addToFeature: function(feature,item){
         this._feature_map[item.get('ObjectID')] = feature.get('ObjectID');
         
-        var feature_total = feature.get('total_planned') || 0;
+        var feature_total_us = feature.get('total_planned_us') || 0;
+        var feature_total_de = feature.get('total_planned_de') || 0;
+        var feature_accepted_us = feature.get('total_accepted_us') || 0;
+        var feature_accepted_de = feature.get('total_accepted_de') || 0;
+        // reset
+        feature.set('total_planned_us',feature_total_us);
+        feature.set('total_planned_de',feature_total_de);
+        feature.set('total_accepted_us',feature_accepted_us);
+        feature.set('total_accepted_de',feature_accepted_de);
+        
         var feature_count = feature.get('child_count') || 0;
         
         var plan_estimate = item.get('PlanEstimate') || 0;
+        var type = item.get('_type');
+        if ( type == "hierarchicalrequirement" ) {
+            feature.set('total_planned_us',feature_total_us + plan_estimate);
+        } else {
+            feature.set('total_planned_de',feature_total_de + plan_estimate);
+        }
         
-        feature.set('total_planned',feature_total + plan_estimate);
+        if ( item.get('AcceptedDate') ) {
+            if ( type == "hierarchicalrequirement" ) {
+                feature.set('total_accepted_us',feature_accepted_us + plan_estimate);
+            } else {
+                feature.set('total_accepted_de',feature_accepted_de + plan_estimate);
+            }
+        }
         feature.set('child_count',feature_count + 1);
     },
     // keep track of calls as we spray a bunch of async calls looking for the most top level parent
@@ -265,7 +330,6 @@ Ext.define('CustomApp', {
             delete me._async_flags[original_child.get('ObjectID')];
             me._makeChart();
         } else {
-            
             Ext.create('Rally.data.WsapiDataStore',{
                 model:'UserStory',
                 autoLoad: true,
@@ -335,33 +399,65 @@ Ext.define('CustomApp', {
         features.sort(me._sortFeatures);
         this.logger.log(this,"...done", features.length, "features");
         
-        var data = [];
+        var total_planned_us = [];
+        var total_planned_de = [];
+        var total_accepted_us = [];
+        var total_accepted_de = [];
         var names = [];
         
         Ext.Array.each(features, function(feature){
             me.logger.log(me,feature.get('Name'), feature.get('child_count'));
             names.push(feature.get('Name'));
-            data.push(feature.get('total_planned'));
+            total_planned_us.push(feature.get('total_planned_us'));
+            total_planned_de.push(feature.get('total_planned_de'));
+            total_accepted_us.push(feature.get('total_accepted_us'));
+            total_accepted_de.push(feature.get('total_accepted_de'));
         });
 
         var series = [
             {
                 type: 'column',
-                data: data,
+                data: total_planned_us,
                 visible: true,
-                name: 'Total Planned US Points'
+                name: 'Total Planned US Points',
+                group: 0
+            },
+            {
+                type: 'column',
+                data: total_accepted_us,
+                visible: true,
+                name: 'Total Accepted US Points',
+                group: 1
+            },
+            {
+                type: 'column',
+                data: total_planned_de,
+                visible: true,
+                name: 'Total Planned DE Points',
+                group: 0
+            },
+            {
+                type: 'column',
+                data: total_accepted_de,
+                visible: true,
+                name: 'Total Accepted DE Points',
+                group: 1
             }
         ];
         return { series: series, categories: names };
     },
     _makeChart: function() {
         this.logger.log(this,"_makeChart");
-        this.down('#chart_box').removeAll();
         
-        var keys = Ext.Object.getKeys(this._async_flags);
-        if ( keys.length > 0 ) {
-            this.logger.log(this,"Waiting for ", keys.length, " searches to complete");
+        var size = Ext.Object.getSize(this._async_flags);
+        if ( this._async_flags["defect"] === 1 || this._async_flags["story"] === 1 ) {
+            // waiting for first run at defects and stories
+        } else if ( size > 0 ) {
+            this.logger.log(this,"Waiting for ", size, " searches to complete");
+            this.down('#chart_box').removeAll();
+            this.down('#selector_box').getEl().mask("Remaining to trace " + size);
         } else {
+            this.down('#chart_box').removeAll();
             var chart_data = this._getChartData();
             this.down('#selector_box').getEl().unmask();
             
@@ -384,6 +480,10 @@ Ext.define('CustomApp', {
                                 style: { fontWeight: 'normal' }
                             }
                         }],
+                        tooltip: {
+                            shared: true,
+                            valueSuffix: ' pts'
+                        },
                         xAxis: [{
                             title: {
                                 enabled: true,

@@ -53,7 +53,7 @@ Ext.define('CustomApp', {
         var release = this.down('#releasebox').getRecord();
         var release_name = release.get('Name');
         
-        var fetch = ['PlanEstimate','Requirement','Name','ObjectID'];
+        var fetch = ['PlanEstimate','Requirement','Name','ObjectID','AcceptedDate'];
         var filters = [{property:'Release.Name',value:release_name}];
         Ext.create('Rally.data.WsapiDataStore',{
             model:'Defect',
@@ -90,7 +90,7 @@ Ext.define('CustomApp', {
         var release = this.down('#releasebox').getRecord();
         var release_name = release.get('Name');
         
-        var fetch = ['PlanEstimate','Parent','Name','ObjectID'];
+        var fetch = ['PlanEstimate','Parent','Name','ObjectID','AcceptedDate'];
         var filters = [{property:'Release.Name',value:release_name}];
         Ext.create('Rally.data.WsapiDataStore',{
             model:'UserStory',
@@ -125,12 +125,33 @@ Ext.define('CustomApp', {
     _addToFeature: function(feature,item){
         this._feature_map[item.get('ObjectID')] = feature.get('ObjectID');
         
-        var feature_total = feature.get('total_planned') || 0;
+        var feature_total_us = feature.get('total_planned_us') || 0;
+        var feature_total_de = feature.get('total_planned_de') || 0;
+        var feature_accepted_us = feature.get('total_accepted_us') || 0;
+        var feature_accepted_de = feature.get('total_accepted_de') || 0;
+        // reset
+        feature.set('total_planned_us',feature_total_us);
+        feature.set('total_planned_de',feature_total_de);
+        feature.set('total_accepted_us',feature_accepted_us);
+        feature.set('total_accepted_de',feature_accepted_de);
+        
         var feature_count = feature.get('child_count') || 0;
         
         var plan_estimate = item.get('PlanEstimate') || 0;
+        var type = item.get('_type');
+        if ( type == "hierarchicalrequirement" ) {
+            feature.set('total_planned_us',feature_total_us + plan_estimate);
+        } else {
+            feature.set('total_planned_de',feature_total_de + plan_estimate);
+        }
         
-        feature.set('total_planned',feature_total + plan_estimate);
+        if ( item.get('AcceptedDate') ) {
+            if ( type == "hierarchicalrequirement" ) {
+                feature.set('total_accepted_us',feature_accepted_us + plan_estimate);
+            } else {
+                feature.set('total_accepted_de',feature_accepted_de + plan_estimate);
+            }
+        }
         feature.set('child_count',feature_count + 1);
     },
     // keep track of calls as we spray a bunch of async calls looking for the most top level parent
@@ -229,21 +250,49 @@ Ext.define('CustomApp', {
         features.sort(me._sortFeatures);
         this.logger.log(this,"...done", features.length, "features");
         
-        var data = [];
+        var total_planned_us = [];
+        var total_planned_de = [];
+        var total_accepted_us = [];
+        var total_accepted_de = [];
         var names = [];
         
         Ext.Array.each(features, function(feature){
             me.logger.log(me,feature.get('Name'), feature.get('child_count'));
             names.push(feature.get('Name'));
-            data.push(feature.get('total_planned'));
+            total_planned_us.push(feature.get('total_planned_us'));
+            total_planned_de.push(feature.get('total_planned_de'));
+            total_accepted_us.push(feature.get('total_accepted_us'));
+            total_accepted_de.push(feature.get('total_accepted_de'));
         });
 
         var series = [
             {
                 type: 'column',
-                data: data,
+                data: total_planned_us,
                 visible: true,
-                name: 'Total Planned US Points'
+                name: 'Total Planned US Points',
+                group: 0
+            },
+            {
+                type: 'column',
+                data: total_accepted_us,
+                visible: true,
+                name: 'Total Accepted US Points',
+                group: 1
+            },
+            {
+                type: 'column',
+                data: total_planned_de,
+                visible: true,
+                name: 'Total Planned DE Points',
+                group: 0
+            },
+            {
+                type: 'column',
+                data: total_accepted_de,
+                visible: true,
+                name: 'Total Accepted DE Points',
+                group: 1
             }
         ];
         return { series: series, categories: names };
@@ -282,6 +331,10 @@ Ext.define('CustomApp', {
                                 style: { fontWeight: 'normal' }
                             }
                         }],
+                        tooltip: {
+                            shared: true,
+                            valueSuffix: ' pts'
+                        },
                         xAxis: [{
                             title: {
                                 enabled: true,
