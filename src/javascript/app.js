@@ -25,12 +25,60 @@ Ext.define('CustomApp', {
                 change: function(rb, new_value, old_value) {
                     this._asynch_return_flags = {};
                     //this._getSprints();
-                    this._getStoriesInRelease();
+                    this._getItemsInRelease();
                 },
                 ready: function(rb) {
                     this._asynch_return_flags = {};
                     //this._getSprints();
-                    this._getStoriesInRelease();
+                    this._getItemsInRelease();
+                }
+            }
+        });
+    },
+    _getItemsInRelease: function() {
+        if ( this.down('#selector_box').getEl() ) {
+            this.down('#selector_box').getEl().mask("Finding Items in Release...");
+        }
+        // clear out trackers
+        this._features = {};
+        this._async_flags = {defect:1,story:1};
+        this._feature_map = {};
+
+        this._getStoriesInRelease();
+        this._getDefectsInRelease();
+    },
+    _getDefectsInRelease: function() {
+        var me = this;
+        this.logger.log(this,"_getDefectsInRelease");
+        var release = this.down('#releasebox').getRecord();
+        var release_name = release.get('Name');
+        
+        var fetch = ['PlanEstimate','Requirement','Name','ObjectID'];
+        var filters = [{property:'Release.Name',value:release_name}];
+        Ext.create('Rally.data.WsapiDataStore',{
+            model:'Defect',
+            autoLoad: true,
+            filters: filters,
+            limit:'Infinity',
+            fetch: fetch,
+            listeners: {
+                scope: this,
+                load: function(store,defects){
+                    me.logger.log(this,"    ...got defects in release",defects.length);
+                    delete me._async_flags["defect"];
+                    
+                    Ext.Array.each(defects,function(defect){  
+                        if ( defect.get('Requirement') !== null ) {
+                            defect.set('Parent',defect.get('Requirement'));
+                            
+                            me._async_flags[defect.get('ObjectID')] = 1;
+                            me._getTopLevelParent(defect,defect);
+                        } else {
+                            me._features[defect.get('ObjectID')] = defect;
+                            me._addToFeature(defect,defect);
+                        }
+                    });
+                    this._makeChart();
                 }
             }
         });
@@ -38,14 +86,7 @@ Ext.define('CustomApp', {
     _getStoriesInRelease: function() {
         var me = this;
         this.logger.log(this,"_getStoriesInRelease");
-        if ( this.down('#selector_box').getEl() ) {
-            this.down('#selector_box').getEl().mask("Finding Stories in Release...");
-        }
-        // clear out trackers
-        this._features = {};
-        this._async_flags = {};
-        this._feature_map = {};
-        
+
         var release = this.down('#releasebox').getRecord();
         var release_name = release.get('Name');
         
@@ -64,7 +105,9 @@ Ext.define('CustomApp', {
                     if ( this.down('#selector_box').getEl() ) {
                         this.down('#selector_box').getEl().mask("Finding Associated Features...");
                     }
-                    Ext.Array.each(stories,function(story){  
+                    var length = stories.length;
+                    for ( var i=0; i<length; i++ ) {
+                        var story = stories[i];
                         if ( story.get('Parent') !== null ) {
                             me._async_flags[story.get('ObjectID')] = 1;
                             me._getTopLevelParent(story,story);
@@ -72,7 +115,8 @@ Ext.define('CustomApp', {
                             me._features[story.get('ObjectID')] = story;
                             me._addToFeature(story,story);
                         }
-                    });
+                    }
+                    delete me._async_flags["story"];
                     this._makeChart();
                 }
             }
@@ -116,7 +160,6 @@ Ext.define('CustomApp', {
             delete me._async_flags[original_child.get('ObjectID')];
             me._makeChart();
         } else {
-            
             Ext.create('Rally.data.WsapiDataStore',{
                 model:'UserStory',
                 autoLoad: true,
@@ -207,12 +250,16 @@ Ext.define('CustomApp', {
     },
     _makeChart: function() {
         this.logger.log(this,"_makeChart");
-        this.down('#chart_box').removeAll();
         
-        var keys = Ext.Object.getKeys(this._async_flags);
-        if ( keys.length > 0 ) {
-            this.logger.log(this,"Waiting for ", keys.length, " searches to complete");
+        var size = Ext.Object.getSize(this._async_flags);
+        if ( this._async_flags["defect"] === 1 || this._async_flags["story"] === 1 ) {
+            // waiting for first run at defects and stories
+        } else if ( size > 0 ) {
+            this.logger.log(this,"Waiting for ", size, " searches to complete");
+            this.down('#chart_box').removeAll();
+            this.down('#selector_box').getEl().mask("Remaining to trace " + size);
         } else {
+            this.down('#chart_box').removeAll();
             var chart_data = this._getChartData();
             this.down('#selector_box').getEl().unmask();
             
