@@ -123,20 +123,23 @@ Ext.define('CustomApp', {
             ],
             _addIterationPicker: function(names){
                 var box = this.down('#iterations_box');
+                var original_iteration_selection = me._selected_iterations;
+                
                 if ( names.length === 0 ) {
                     box.add({ xtype:'container',html:'No iterations in release'});
                 } else {
                     var cbs = [{
                         name:'iterationGroup',
                         boxLabel:'Unassigned',
-                        checked:true,
+                        checked:Ext.Array.contains(me._selected_iterations,"Unassigned"),
                         boxLabelAlign:'after'
                     }];
+                    
                     Ext.Array.each(names, function(name){
                         cbs.push({
                             name:'iterationGroup',
                             boxLabel:name,
-                            checked:true,
+                            checked:Ext.Array.contains(me._selected_iterations,name),
                             boxLabelAlign:'after'
                         });
                     });
