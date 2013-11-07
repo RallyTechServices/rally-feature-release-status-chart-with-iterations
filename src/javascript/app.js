@@ -78,7 +78,8 @@ Ext.define('CustomApp', {
                             me.dialog.down('#iterations_box').removeAll();
                             var iterations = me._getIterationNamesInRelease(rb.getRecord(),me.dialog);
                         }
-                    }
+                    },
+                    value: me._selected_release
                 },
                 { 
                     xtype: 'rallybutton',
@@ -87,10 +88,12 @@ Ext.define('CustomApp', {
                     text:'Uncheck All',
                     handler: function() {
                         var cbg = me.dialog.down('#checkboxgroup');
-                        var boxes = cbg.getChecked();
-                        Ext.Array.each(boxes,function(box){
-                            box.setValue(false);
-                        });
+                        if (cbg) {
+                            var boxes = cbg.getChecked();
+                            Ext.Array.each(boxes,function(box){
+                                box.setValue(false);
+                            });
+                        }
                     }
                 },
                 { 
@@ -100,10 +103,11 @@ Ext.define('CustomApp', {
                     text:'Check All',
                     handler: function() {
                         var cbg = me.dialog.down('#checkboxgroup');
-                        
-                        cbg.setValue({
-                            iterationGroup: true
-                        });
+                        if ( cbg ) {
+                            cbg.setValue({
+                                iterationGroup: true
+                            });
+                        }
                     }
                 },
                 {
@@ -122,7 +126,12 @@ Ext.define('CustomApp', {
                         me._selected_release =  me.dialog.down('#releasebox').getRecord();
                         me._selected_iterations = [];
                         me._asynch_return_flags = {};
-                        var checked = me.dialog.down('#checkboxgroup').getChecked();
+                        var cbg = me.dialog.down('#checkboxgroup');
+                        
+                        var checked = [];
+                        if (cbg) {
+                            checked = cbg.getChecked();
+                        }
                         Ext.Array.each(checked,function(box){
                             me._selected_iterations.push(box.boxLabel);
                         });
@@ -139,6 +148,8 @@ Ext.define('CustomApp', {
             ],
             _addIterationPicker: function(names){
                 var box = this.down('#iterations_box');
+                box.removeAll();
+                
                 var original_iteration_selection = me._selected_iterations;
                 
                 if ( names.length === 0 ) {
