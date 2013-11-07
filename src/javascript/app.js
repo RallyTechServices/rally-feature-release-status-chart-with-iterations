@@ -39,6 +39,7 @@ Ext.define('CustomApp', {
         if ( this.down('#selector_box').getEl() ) {
             this.down('#selector_box').getEl().mask("Finding Items in Release...");
         }
+        this.down('#chart_box').removeAll();
         // clear out trackers
         this._features = {};
         this._async_flags = {defect:1,story:1};
@@ -53,7 +54,7 @@ Ext.define('CustomApp', {
         var release = this.down('#releasebox').getRecord();
         var release_name = release.get('Name');
         
-        var fetch = ['PlanEstimate','Requirement','Name','ObjectID','AcceptedDate'];
+        var fetch = ['FormattedID','PlanEstimate','Requirement','Name','ObjectID','AcceptedDate'];
         var filters = [{property:'Release.Name',value:release_name}];
         Ext.create('Rally.data.WsapiDataStore',{
             model:'Defect',
@@ -65,7 +66,6 @@ Ext.define('CustomApp', {
                 scope: this,
                 load: function(store,defects){
                     me.logger.log(this,"    ...got defects in release",defects.length);
-                    delete me._async_flags["defect"];
                     
                     Ext.Array.each(defects,function(defect){  
                         if ( defect.get('Requirement') !== null ) {
@@ -78,6 +78,8 @@ Ext.define('CustomApp', {
                             me._addToFeature(defect,defect);
                         }
                     });
+                    delete me._async_flags["defect"];
+                    this.logger.log(this,"   ...defects set");
                     this._makeChart();
                 }
             }
@@ -90,7 +92,7 @@ Ext.define('CustomApp', {
         var release = this.down('#releasebox').getRecord();
         var release_name = release.get('Name');
         
-        var fetch = ['PlanEstimate','Parent','Name','ObjectID','AcceptedDate'];
+        var fetch = ['FormattedID','PlanEstimate','Parent','Name','ObjectID','AcceptedDate'];
         var filters = [{property:'Release.Name',value:release_name}];
         Ext.create('Rally.data.WsapiDataStore',{
             model:'UserStory',
@@ -98,6 +100,12 @@ Ext.define('CustomApp', {
             filters: filters,
             limit:'Infinity',
             fetch: fetch,
+            sorters: [
+                {
+                    property: 'LastUpdateDate',
+                    direction: 'DESC'
+                }
+            ],
             listeners: {
                 scope: this,
                 load: function(store,stories){
@@ -113,10 +121,11 @@ Ext.define('CustomApp', {
                             me._getTopLevelParent(story,story);
                         } else {
                             me._features[story.get('ObjectID')] = story;
-                            me._addToFeature(story,story);
+                            me._addToFeature(story,story,story);
                         }
                     }
                     delete me._async_flags["story"];
+                    this.logger.log(this,"... story set");
                     this._makeChart();
                 }
             }
@@ -155,11 +164,15 @@ Ext.define('CustomApp', {
         feature.set('child_count',feature_count + 1);
     },
     // keep track of calls as we spray a bunch of async calls looking for the most top level parent
-    _getTopLevelParent: function(story,original_child) {
-        this.logger.log(this,"_getTopLevelParent");
+    // hierarchy is an array to hold on to for the story tree in case we can use it for pulling a feature without querying
+    _getTopLevelParent: function(story,original_child,hierarchy) {
+        this.logger.log(this,"_getTopLevelParent",story.get('FormattedID'), 'root', original_child.get('FormattedID'));
         var me = this;
-        var fetch = ['PlanEstimate','Parent','Name','ObjectID'];
+        var fetch = ['FormattedID','PlanEstimate','Parent','Name','ObjectID'];
         var filters = [{property:'ObjectID',value:story.get('Parent').ObjectID}];
+        if ( !hierarchy ) {
+            hierarchy = [original_child.get('ObjectID')];
+        }
         
         // check first to see if this is in the map (so we don't bother the network)
         if ( me._feature_map[story.get('Parent').ObjectID] ) {
@@ -174,47 +187,39 @@ Ext.define('CustomApp', {
             me._addToFeature(feature,original_child);
             delete me._async_flags[original_child.get('ObjectID')];
             me._makeChart();
-        } else if (me._features[story.get('Parent').ObjectID]) {
-            me.logger.log(this,"Already know parent feature (instead of querying)");
-            var feature = me._features[story.get('Parent').ObjectID];
-            me._addToFeature(feature,original_child);
-            delete me._async_flags[original_child.get('ObjectID')];
-            me._makeChart();
         } else {
+            // go get story's parent
             Ext.create('Rally.data.WsapiDataStore',{
                 model:'UserStory',
                 autoLoad: true,
                 filters: filters,
                 fetch: fetch,
+                context: {
+                    project: null
+                },
                 listeners: {
                     scope: this,
                     load: function(store,parents){
+                        if ( parents.length == 0 ) {
+                            throw "ERROR: Can't find parent for " + story.get('FormattedID');
+                            me._makeChart();
+                        }
                         Ext.Array.each(parents,function(parent){
+                            hierarchy.push(parent.get('ObjectID'));
                             if ( parent.get('Parent') !== null ) {
-                                if ( story.get('ObjectID') !== original_child.get('ObjectID') ) {
-                                    delete me._async_flags[story.get('ObjectID')];
-                                }
-                                
-                                if ( me._features[parent.get('Parent').ObjectID] ) {
-                                    // put into map hash for easy pulling later
-                                    me.logger.log(me,"My Parent is already known");
-                                    me._feature_map[parent.get('ObjectID')] = me._features[parent.get('Parent').ObjectID].get('ObjectID');
-                                    me._feature_map[story.get('ObjectID')]  = me._features[parent.get('Parent').ObjectID].get('ObjectID');
-                                    me._addToFeature(me._features[parent.get('Parent').ObjectID],original_child);
-                                    delete me._async_flags[original_child.get('ObjectID')];
-                                    me._makeChart();
-                                } else {
-                                    me._getTopLevelParent(parent,original_child);
-                                }
+                                me._getTopLevelParent(parent,original_child,hierarchy);
                             } else {
+                                Ext.Array.each(hierarchy,function(oid){
+                                    me._feature_map[oid] = parent.get('ObjectID');
+                                });
                                 // we're at the top
                                 if ( !me._features[parent.get('ObjectID')] ) {
                                     me._features[parent.get('ObjectID')] = parent;
                                 }
                                 // put into map hash for easy pulling later
-                                me._feature_map[story.get('ObjectID')] = parent.get('ObjectID');
                                 me._addToFeature(me._features[parent.get('ObjectID')], original_child);
                                 delete me._async_flags[original_child.get('ObjectID')];
+                                me.logger.log(me,"Feature",parent.get('FormattedID'));
                                 me._makeChart();
                             }
                         });
