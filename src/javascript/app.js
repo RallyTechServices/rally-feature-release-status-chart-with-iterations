@@ -22,7 +22,23 @@ Ext.define('CustomApp', {
             success: function(model) {
                 me._story_model = model;
                 me._addSelectors();
+                me._addSummary();
             }
+        });
+    },
+    _addSummary: function() {
+        var selector_box = this.down('#selector_box');
+
+        selector_box.add({
+            xtype:'container',
+            itemId:'summary',
+            tpl: "<table class='summary'><tr>" +
+                "<td class='summary'>Total Planned US Points: <b>{total_story_estimate}</b></td>" +
+                "<td class='summary'>Accepted US Points: <b>{total_accepted_story_estimate}</b></td>" +
+                "<td class='summary'>Total DE Points: <b>{total_defect_estimate}</b></td>" +
+                "<td class='summary'>Accepted DE Points: <b>{total_accepted_defect_estimate}</b></td>" +
+                "</tr></table>",
+            data: { }
         });
     },
     _addSelectors: function() {
@@ -203,7 +219,10 @@ Ext.define('CustomApp', {
         // clear out trackers
         this._features = {};
         this._feature_map = {};
-
+        if ( this.down('#summary') ) {
+            this.down('#summary').update({});
+        }
+        
         var release_name = this._selected_release.get('Name');
         
 
@@ -321,31 +340,31 @@ Ext.define('CustomApp', {
     _addToFeature: function(feature,item){
         this._feature_map[item.get('ObjectID')] = feature.get('ObjectID');
         
-        var feature_total_us = feature.get('total_planned_us') || 0;
-        var feature_total_de = feature.get('total_planned_de') || 0;
-        var feature_accepted_us = feature.get('total_accepted_us') || 0;
-        var feature_accepted_de = feature.get('total_accepted_de') || 0;
+        var feature_total_us = feature.get('total_story_estimate') || 0;
+        var feature_total_de = feature.get('total_defect_estimate') || 0;
+        var feature_accepted_us = feature.get('total_accepted_story_estimate') || 0;
+        var feature_accepted_de = feature.get('total_accepted_defect_estimate') || 0;
         // reset
-        feature.set('total_planned_us',feature_total_us);
-        feature.set('total_planned_de',feature_total_de);
-        feature.set('total_accepted_us',feature_accepted_us);
-        feature.set('total_accepted_de',feature_accepted_de);
+        feature.set('total_story_estimate',feature_total_us);
+        feature.set('total_defect_estimate',feature_total_de);
+        feature.set('total_accepted_story_estimate',feature_accepted_us);
+        feature.set('total_accepted_defect_estimate',feature_accepted_de);
         
         var feature_count = feature.get('child_count') || 0;
         
         var plan_estimate = item.get('PlanEstimate') || 0;
         var type = item.get('_type');
         if ( type == "hierarchicalrequirement" ) {
-            feature.set('total_planned_us',feature_total_us + plan_estimate);
+            feature.set('total_story_estimate',feature_total_us + plan_estimate);
         } else {
-            feature.set('total_planned_de',feature_total_de + plan_estimate);
+            feature.set('total_defect_estimate',feature_total_de + plan_estimate);
         }
         
         if ( item.get('AcceptedDate') ) {
             if ( type == "hierarchicalrequirement" ) {
-                feature.set('total_accepted_us',feature_accepted_us + plan_estimate);
+                feature.set('total_accepted_story_estimate',feature_accepted_us + plan_estimate);
             } else {
-                feature.set('total_accepted_de',feature_accepted_de + plan_estimate);
+                feature.set('total_accepted_defect_estimate',feature_accepted_de + plan_estimate);
             }
         }
         feature.set('child_count',feature_count + 1);
@@ -433,46 +452,62 @@ Ext.define('CustomApp', {
         features.sort(me._sortFeatures);
         this.logger.log(this,"...done", features.length, "features");
         
-        var total_planned_us = [];
-        var total_planned_de = [];
-        var total_accepted_us = [];
-        var total_accepted_de = [];
+        var total_story_estimate = [];
+        var total_defect_estimate = [];
+        var total_accepted_story_estimate = [];
+        var total_accepted_defect_estimate = [];
         var names = [];
+        
+        var totals = {
+            total_accepted_story_estimate:0,
+            total_accepted_defect_estimate:0,
+            total_story_estimate:0,
+            total_defect_estimate:0,
+            total_estimate:0
+        };
         
         Ext.Array.each(features, function(feature){
             me.logger.log(me,feature.get('Name'), feature.get('child_count'));
             names.push(feature.get('Name'));
-            total_planned_us.push(feature.get('total_planned_us'));
-            total_planned_de.push(feature.get('total_planned_de'));
-            total_accepted_us.push(feature.get('total_accepted_us'));
-            total_accepted_de.push(feature.get('total_accepted_de'));
+            total_story_estimate.push(feature.get('total_story_estimate'));
+            total_defect_estimate.push(feature.get('total_defect_estimate'));
+            total_accepted_story_estimate.push(feature.get('total_accepted_story_estimate'));
+            total_accepted_defect_estimate.push(feature.get('total_accepted_defect_estimate'));
+        
+            Ext.Object.each(totals, function(key,value){
+                totals[key] += feature.get(key);
+            });
         });
+        
 
+
+        this.down('#summary').update(totals);
+        
         var series = [
             {
                 type: 'column',
-                data: total_planned_us,
+                data: total_story_estimate,
                 visible: true,
                 name: 'Total Planned US Points',
                 group: 0
             },
             {
                 type: 'column',
-                data: total_accepted_us,
+                data: total_accepted_story_estimate,
                 visible: true,
                 name: 'Total Accepted US Points',
                 group: 1
             },
             {
                 type: 'column',
-                data: total_planned_de,
+                data: total_defect_estimate,
                 visible: true,
                 name: 'Total Planned DE Points',
                 group: 0
             },
             {
                 type: 'column',
-                data: total_accepted_de,
+                data: total_accepted_defect_estimate,
                 visible: true,
                 name: 'Total Accepted DE Points',
                 group: 1
